@@ -1,0 +1,11 @@
+od_id,origin_station,destination_station,demand
+0,A,E,50
+1,A,C,95
+2,C,E,95
+3,A,B,80
+4,B,E,80
+5,E,A,60
+6,E,C,90
+7,C,A,90
+8,E,D,75
+9,D,A,75

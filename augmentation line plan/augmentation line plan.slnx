@@ -1,0 +1,8 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="augmentation line plan/augmentation line plan.vcxproj" Id="082a8117-ec2b-4992-8ab0-1ca40697f1f6" />
+  <Project Path="../third_party/cadical-3.0.1/msvc/cadical.vcxproj" Id="1e0dbb5b-7899-49c2-9c62-9b063d7173dd" />
+  <Project Path="../tests/timetable_sat_tests.vcxproj" Id="d9fa7600-3c9d-4bed-871a-d0367cb8ad13" />
+</Solution>

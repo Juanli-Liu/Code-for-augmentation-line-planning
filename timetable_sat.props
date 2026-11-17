@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 所有使用迭代协调器的工程共用 SAT 源码和 CaDiCaL 工程引用。 -->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <TimetableSourceRoot>$(MSBuildThisFileDirectory)augmentation line plan\augmentation line plan\</TimetableSourceRoot>
+    <CadicalRoot>$(MSBuildThisFileDirectory)third_party\cadical-3.0.1\</CadicalRoot>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(CadicalRoot)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <!-- 主工程直接登记本地源码，测试工程仍复用这里的生产源码清单。 -->
+  <ItemGroup Condition="'$(TimetableSourcesInProject)'!='true'">
+    <ClCompile Include="$(TimetableSourceRoot)timetable_solution.cpp" />
+    <ClCompile Include="$(TimetableSourceRoot)timetable_sat.cpp" />
+    <ClInclude Include="$(TimetableSourceRoot)timetable_solution.h" />
+    <ClInclude Include="$(TimetableSourceRoot)timetable_sat.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(CadicalRoot)msvc\cadical.vcxproj">
+      <Project>{1E0DBB5B-7899-49C2-9C62-9B063D7173DD}</Project>
+      <GlobalPropertiesToRemove>OutDir;IntDir</GlobalPropertiesToRemove>
+    </ProjectReference>
+  </ItemGroup>
+</Project>

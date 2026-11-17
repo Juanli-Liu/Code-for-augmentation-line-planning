@@ -1,0 +1,9 @@
+section_id,from_station,to_station,maximum_train_count,pure_running_time,direction
+0,A,B,4,10,down
+1,B,C,4,10,down
+2,C,D,4,10,down
+3,D,E,4,10,down
+4,E,D,4,10,up
+5,D,C,4,10,up
+6,C,B,4,10,up
+7,B,A,4,10,up

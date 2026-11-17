@@ -1,0 +1,63 @@
+# Publish source and reproducible inputs only. All other files stay local.
+*
+!*/
+!/.gitignore
+!/README.md
+!/C++Style_CN.md
+!/timetable_sat.props
+!/scripts/*.py
+!/scripts/*.ps1
+!/scripts/*.md
+!/tests/*.cpp
+!/tests/*.h
+!/tests/*.vcxproj
+!/tests/*.py
+!/tests/*.md
+!/augmentation line plan/*.slnx
+!/augmentation line plan/augmentation line plan/*.cpp
+!/augmentation line plan/augmentation line plan/*.h
+!/augmentation line plan/augmentation line plan/*.vcxproj
+!/augmentation line plan/augmentation line plan/*.vcxproj.filters
+!/augmentation line plan/cadical smoke test/*.cpp
+!/augmentation line plan/cadical smoke test/*.vcxproj
+!/augmentation line plan/*/README.md
+!/augmentation line plan/*/stations.csv
+!/augmentation line plan/*/sections.csv
+!/augmentation line plan/*/platforms.csv
+!/augmentation line plan/*/lines.csv
+!/augmentation line plan/*/line_allowed_platforms.csv
+!/augmentation line plan/*/ods.csv
+!/augmentation line plan/*/parameters.csv
+!/augmentation line plan/*/timetable.csv
+!/augmentation line plan/Test_data/verify_iteration.cpp
+!/augmentation line plan/Test_data/verify_iteration.vcxproj
+!/augmentation line plan/Test_data_complex/verify_complex.cpp
+!/augmentation line plan/Test_data_complex/verify_complex.vcxproj
+!/third_party/README.md
+!/third_party/cadical-3.0.1/LICENSE
+!/third_party/cadical-3.0.1/VERSION
+!/third_party/cadical-3.0.1/README.md
+!/third_party/cadical-3.0.1/src/*.cpp
+!/third_party/cadical-3.0.1/src/*.c
+!/third_party/cadical-3.0.1/src/*.hpp
+!/third_party/cadical-3.0.1/src/*.h
+!/third_party/cadical-3.0.1/msvc/*.vcxproj
+!/third_party/cadical-3.0.1/msvc-compat/*.h
+!/third_party/cadical-3.0.1/msvc-compat/*.hpp
+
+# Never traverse local data, solver installations, snapshots or build output.
+/tmp/
+/experiments/
+/baselines/
+/third_party/copt80/
+/third_party/downloads/
+**/results/
+**/.git/
+**/.vs/
+**/.codex/
+**/.agents/
+**/__pycache__/
+**/x64/
+**/Debug/
+**/Release/
+**/build/

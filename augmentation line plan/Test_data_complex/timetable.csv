@@ -1,0 +1,3 @@
+trainID,FromNode,ToNode,Paths,Times
+D0,A,E,A-t1;A-t1;B-t1;B-t1;C-t1;C-t1;D-t1;D-t1;E-t1;E-t1,15;30;34;49;53;68;72;87
+U0,E,A,E-t2;E-t2;D-t2;D-t2;C-t2;C-t2;B-t2;B-t2;A-t2;A-t2,15;30;34;49;53;68;72;87
