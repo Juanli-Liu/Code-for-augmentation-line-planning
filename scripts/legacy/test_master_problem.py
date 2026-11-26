@@ -8,12 +8,14 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import uuid
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from plot_existing_timetable import derive_visit_times
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "augmentation line plan" / "Data"
 
 

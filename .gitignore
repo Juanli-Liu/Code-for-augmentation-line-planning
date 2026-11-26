@@ -8,6 +8,8 @@
 !/scripts/*.py
 !/scripts/*.ps1
 !/scripts/*.md
+!/scripts/legacy/test_input_data.py
+!/scripts/legacy/test_master_problem.py
 !/tests/*.cpp
 !/tests/*.h
 !/tests/*.vcxproj
