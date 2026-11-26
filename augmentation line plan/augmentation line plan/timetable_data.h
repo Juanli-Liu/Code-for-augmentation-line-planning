@@ -65,30 +65,29 @@ struct TimetableTrain {
     std::vector<std::size_t> visit_indices;      ///< TimetableData::visits 的下标，按车站访问顺序排列。
 };
 
-/// @brief 同站同向的两次访问，为求解器提供到达和出发次序的定义。
-/// @details 共同轨道是两次访问可用轨道的交集。只有两车实际选择了同一条共同轨道，
-/// 才按到达次序和 track_headway 约束这条轨道的占用。交集为空时仍保留到发次序。
-struct TimetableStationConflict {
-    std::size_t first_visit_index;             ///< visits 下标，原列车编号较小的一方。
-    std::size_t second_visit_index;            ///< visits 下标，原列车编号较大的一方。
-    int arrival_headway;                       ///< 有效到达间隔；任一车在本站始发时为零。
-    int departure_headway;                     ///< 有效出发间隔；任一车在本站终到时为零。
-    std::vector<int> common_platform_indices;  ///< 两次访问均可使用的 Platform::index()，按升序排列。
+/// @brief 共用有向区间的两车，按原列车编号排序。
+struct TimetableSectionOrder {
+    int section_index; ///< 原有向区间内部编号。
+    std::size_t first_entry_visit_index; ///< 第一车入口 visits 下标。
+    std::size_t first_exit_visit_index; ///< 第一车出口 visits 下标。
+    std::size_t second_entry_visit_index; ///< 第二车入口 visits 下标。
+    std::size_t second_exit_visit_index; ///< 第二车出口 visits 下标。
+    int arrival_headway; ///< 出口到达间隔，单位 time_step。
+    int departure_headway; ///< 入口出发间隔，单位 time_step。
 };
 
-/// @brief 关联共用有向区间的两车在入口的出发次序和出口的到达次序。
-/// @details 两个下标均指向 TimetableData::station_conflicts。两条冲突记录中的第一方和
-/// 第二方分别是同一趟车，求解时令入口出发次序与出口到达次序一致。
-struct TimetableSectionOrder {
-    int section_index;                          ///< 原有向 Section::index()。
-    std::size_t entry_departure_conflict_index;  ///< 入口站冲突记录的下标，使用该记录的出发次序。
-    std::size_t exit_arrival_conflict_index;     ///< 出口站冲突记录的下标，使用该记录的到达次序。
+/// @brief 共同可用轨道的两次访问及其关联区间次序。
+struct TimetableTrackConflict {
+    std::size_t first_visit_index; ///< 第一车 visits 下标。
+    std::size_t second_visit_index; ///< 第二车 visits 下标。
+    std::size_t section_order_index; ///< section_orders 下标。
+    std::vector<int> common_platform_indices; ///< 共同允许的轨道内部编号。
 };
 
 /// @brief 一组选中候选与全部既有车对应的时刻表建模输入。
 /// @details trains 用原列车内部编号查找，编号可不连续。其余记录按所在 vector 的下标编号。
 /// 从列车通过 visit_indices 查访问，再通过访问的两个事件下标查时间域。
-/// 活动直接引用事件，车站冲突直接引用访问，区间关联直接引用车站冲突。
+/// 活动引用事件，区间次序和轨道冲突引用访问。
 /// 时间字段均为整数 time_step，SecondsPerStep() 用于换算。
 struct TimetableData {
     int planning_horizon;                         ///< parameters.csv:planning_horizon，时间域上界 H。
@@ -99,7 +98,7 @@ struct TimetableData {
     std::vector<TimetableVisit> visits;            ///< 每趟车每到访一站有一条记录。
     std::vector<TimetableEvent> events;            ///< 每条访问有两个事件，各自保存时间域。
     std::vector<TimetableActivity> activities;     ///< 区间运行和站内占轨对事件时差的要求。
-    std::vector<TimetableStationConflict> station_conflicts;  ///< 每个同站同向列车对的到发和共轨关系。
+    std::vector<TimetableTrackConflict> track_conflicts; ///< 同站共轨冲突。
     std::vector<TimetableSectionOrder> section_orders;        ///< 每个共用区间列车对的入口与出口次序关联。
     int time_step_seconds = 0;                    ///< 0时兼容旧分钟输入；正数为每步秒数。
     std::int64_t SecondsPerStep() const noexcept {

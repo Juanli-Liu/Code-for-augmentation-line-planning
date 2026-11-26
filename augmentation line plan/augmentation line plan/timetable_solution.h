@@ -18,15 +18,14 @@ enum class TimetableBackend { Milp, Sat };
 
 /// @brief true 表示冲突记录中的 first_visit 先于 second_visit。
 struct TimetableOrder {
-    bool first_arrives_first; ///< [内部计算] 到达侧次序。
-    bool first_departs_first; ///< [内部计算] 出发侧次序。
+    bool first_before_second; ///< [内部计算] 区间次序。
 };
 
 /// @brief 下标与 TimetableData 一一对应，不保存求解器对象。
 struct TimetableSolution {
     std::vector<int> event_times;     ///< [内部计算] events 下标 -> 整数时刻，单位 time_step。
     std::vector<int> visit_platforms; ///< [内部编号] visits 下标 -> 原轨道编号。
-    std::vector<TimetableOrder> orders; ///< [内部计算] station_conflicts 下标 -> 到发次序。
+    std::vector<TimetableOrder> orders; ///< [内部计算] section_orders 下标 -> 区间次序。
 };
 
 /// @brief 可审计的候选激活映射；跨候选子句会计入每个参与候选。

@@ -23,8 +23,7 @@ constexpr double kValueTolerance = 1e-6; // COPT 整数容差、约束容差及�
 /// @brief 保存求解器句柄；每个 vector 均与 TimetableData 的对应集合对齐。
 struct TimetableVariables {
     std::vector<Var> times;                   // tau_e：每个事件的整数时刻。
-    std::vector<Var> arrival_orders;          // lambda_arr：下标 c 对应 station_conflicts[c] 的到达侧次序。
-    std::vector<Var> departure_orders;        // lambda_dep：同一下标 c 的出发侧次序，终到时比较释放轨道事件。
+    std::vector<Var> section_orders; // 每个区间列车对共用一个次序变量；1 表示 first 在前，零间隔允许同刻。
     std::vector<std::map<int, Var>> tracks;   // z_v,g：访问下标 -> 原轨道编号 -> 二元变量。
 };
 
@@ -50,14 +49,9 @@ TimetableVariables AddVariablesAndTrackAssignmentConstraints(Model& model, const
         variables.times.push_back(model.AddVar(domain.lower, domain.upper, 0.0, COPT_INTEGER,
             ("tau_" + std::to_string(e)).c_str()));
     }
-    // c 为同站同向冲突记录下标，两个次序变量始终引用同一对 first/second 访问。
-    // 始发/终到也保留两个变量：对应侧分别表示开始占轨/释放轨道的次序。
-    // 数据层将含始发的到达间隔、含终到的出发间隔置零，避免施加实际到发间隔。
-    for (std::size_t c = 0; c < data.station_conflicts.size(); ++c) {
-        const auto suffix = std::to_string(c); // 同一冲突的到达和出发变量共享编号。
-        variables.arrival_orders.push_back(model.AddVar(0.0, 1.0, 0.0, COPT_BINARY, ("arr_order_" + suffix).c_str()));
-        variables.departure_orders.push_back(model.AddVar(0.0, 1.0, 0.0, COPT_BINARY, ("dep_order_" + suffix).c_str()));
-    }
+    for (std::size_t k = 0; k < data.section_orders.size(); ++k)
+        variables.section_orders.push_back(model.AddVar(0.0, 1.0, 0.0, COPT_BINARY,
+            ("section_order_" + std::to_string(k)).c_str()));
     variables.tracks.resize(data.visits.size());
     // v 为列车的一次车站访问下标，不是车站编号；同站不同列车拥有不同的轨道变量。
     for (std::size_t v = 0; v < data.visits.size(); ++v) {
@@ -114,37 +108,28 @@ void AddOrderedHeadway(Model& model, const TimetableData& data, const TimetableV
     model.AddConstr(first_time - second_time + reverse_m * order >= gap, (name + "_reverse").c_str());
 }
 
-/// @brief 按已构建的同站同向冲突集合添加到达、出发间隔，端点有效间隔可为零。
+/// @brief 区间入口出发与出口到达使用同一次序。
 void AddHeadwayConstraints(Model& model, const TimetableData& data, const TimetableVariables& variables) {
-    for (std::size_t c = 0; c < data.station_conflicts.size(); ++c) {
-        const auto& conflict = data.station_conflicts[c];
-        const auto& first = data.visits.at(conflict.first_visit_index);
-        const auto& second = data.visits.at(conflict.second_visit_index);
-        // eq:ttp-arrival-headway-forward/reverse。零间隔仍定义到达侧的先后次序。
-        AddOrderedHeadway(model, data, variables, first.arrival_side_event_index, second.arrival_side_event_index,
-            conflict.arrival_headway, variables.arrival_orders[c], "arrival_" + std::to_string(c));
-        // eq:ttp-departure-headway-forward/reverse。
-        AddOrderedHeadway(model, data, variables, first.departure_side_event_index, second.departure_side_event_index,
-            conflict.departure_headway, variables.departure_orders[c], "departure_" + std::to_string(c));
-    }
-}
-
-/// @brief eq:ttp-section-order-consistency：同一有向区间入口与出口的两车次序相同。
-void AddSectionOrderConstraints(Model& model, const TimetableData& data, const TimetableVariables& variables) {
     for (std::size_t k = 0; k < data.section_orders.size(); ++k) {
-        const auto& order = data.section_orders[k]; // 两端冲突已经由数据层统一 first/second 列车方向。
-        model.AddConstr(variables.departure_orders.at(order.entry_departure_conflict_index)
-            == variables.arrival_orders.at(order.exit_arrival_conflict_index), ("section_order_" + std::to_string(k)).c_str());
+        const auto& section = data.section_orders[k];
+        const auto& first_entry = data.visits.at(section.first_entry_visit_index);
+        const auto& second_entry = data.visits.at(section.second_entry_visit_index);
+        const auto& first_exit = data.visits.at(section.first_exit_visit_index);
+        const auto& second_exit = data.visits.at(section.second_exit_visit_index);
+        AddOrderedHeadway(model, data, variables, first_entry.departure_side_event_index,
+            second_entry.departure_side_event_index, section.departure_headway, variables.section_orders[k], "departure_" + std::to_string(k));
+        AddOrderedHeadway(model, data, variables, first_exit.arrival_side_event_index,
+            second_exit.arrival_side_event_index, section.arrival_headway, variables.section_orders[k], "arrival_" + std::to_string(k));
     }
 }
 
-/// @brief 两车选择同一轨道时，按到达次序要求前车释放后再经过 track_headway。
+/// @brief 两车选择同一轨道时，按关联区间次序要求前车释放后再经过 track_headway。
 void AddTrackCompatibilityConstraints(Model& model, const TimetableData& data, const TimetableVariables& variables) {
-    for (std::size_t c = 0; c < data.station_conflicts.size(); ++c) {
-        const auto& conflict = data.station_conflicts[c];
+    for (std::size_t c = 0; c < data.track_conflicts.size(); ++c) {
+        const auto& conflict = data.track_conflicts[c];
         const auto& first = data.visits.at(conflict.first_visit_index);
         const auto& second = data.visits.at(conflict.second_visit_index);
-        const auto& order = variables.arrival_orders[c]; // 复用 lambda_arr，不另建占轨次序变量。
+        const auto& order = variables.section_orders.at(conflict.section_order_index); // 复用关联区间次序。
         // M 的前事件必须是释放侧，后事件必须是开始占轨侧。
         const double forward_m = DifferenceBigM(data, first.departure_side_event_index,
                                                 second.arrival_side_event_index, data.track_headway);
@@ -154,12 +139,12 @@ void AddTrackCompatibilityConstraints(Model& model, const TimetableData& data, c
             const auto& first_track = variables.tracks.at(conflict.first_visit_index).at(platform);
             const auto& second_track = variables.tracks.at(conflict.second_visit_index).at(platform);
             const auto suffix = std::to_string(c) + "_" + std::to_string(platform);
-            // eq:ttp-track-compatibility-forward：z_i=z_j=lambda_arr=1 时松弛项为零。
+            // eq:ttp-track-compatibility-forward：z_i=z_j=区间次序=1 时松弛项为零。
             model.AddConstr(variables.times.at(second.arrival_side_event_index)
                 - variables.times.at(first.departure_side_event_index)
                 + forward_m * (3.0 - first_track - second_track - order) >= data.track_headway,
                 ("track_forward_" + suffix).c_str());
-            // eq:ttp-track-compatibility-reverse：z_i=z_j=1、lambda_arr=0 时松弛项为零。
+            // eq:ttp-track-compatibility-reverse：z_i=z_j=1、区间次序=0 时松弛项为零。
             model.AddConstr(variables.times.at(first.arrival_side_event_index)
                 - variables.times.at(second.departure_side_event_index)
                 + reverse_m * (2.0 - first_track - second_track + order) >= data.track_headway,
@@ -197,10 +182,8 @@ TimetableSolution ExtractSolution(const TimetableData& data, TimetableVariables&
             throw std::runtime_error("既有列车固定轨道发生变化。");
         solution.visit_platforms.push_back(*chosen);
     }
-    for (std::size_t c = 0; c < data.station_conflicts.size(); ++c) {
-        solution.orders.push_back({ReadInteger(variables.arrival_orders[c], 0, 1, "到达次序") == 1,
-                                  ReadInteger(variables.departure_orders[c], 0, 1, "出发次序") == 1});
-    }
+    for (auto& order : variables.section_orders)
+        solution.orders.push_back({ReadInteger(order, 0, 1, "区间次序") == 1});
     return solution;
 }
 
@@ -233,7 +216,6 @@ InputResult<TimetableMilpResult> SolveTimetableMilp(const TimetableData& timetab
         auto variables = AddVariablesAndTrackAssignmentConstraints(model, timetable);
         AddActivityConstraints(model, timetable, variables);
         AddHeadwayConstraints(model, timetable, variables);
-        AddSectionOrderConstraints(model, timetable, variables);
         AddTrackCompatibilityConstraints(model, timetable, variables);
         model.Solve();
 

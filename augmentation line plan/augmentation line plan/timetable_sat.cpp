@@ -63,8 +63,9 @@ public:
         AllocateVariables();
         EncodeEvents();
         EncodeActivities();
-        EncodeHeadwaysAndTracks();
-        EncodeSectionOrders();
+        EncodeTrackAssignments();
+        EncodeSectionHeadways();
+        EncodeTrackConflicts();
     }
 
     std::size_t variable_count() const { return static_cast<std::size_t>(last_variable_); }
@@ -119,9 +120,8 @@ public:
             if (!selected) throw std::runtime_error("SAT 一次访问没有选中轨道。");
             solution.visit_platforms.push_back(*selected);
         }
-        // ③ 还原冲突对 c 的到达、出发次序：真表示 first 在前，假表示 second 在前。
-        for (std::size_t c = 0; c < arrival_orders_.size(); ++c)
-            solution.orders.push_back({ReadBoolean(arrival_orders_[c]), ReadBoolean(departure_orders_[c])});
+        for (int order : section_orders_)
+            solution.orders.push_back({ReadBoolean(order)});
         // 返回后，由调用方独立检查整个时刻表是否满足约束。
         return solution;
     }
@@ -148,9 +148,21 @@ private:
                 visit.allowed_platform_indices.end(), *visit.fixed_platform_index) == visit.allowed_platform_indices.end())
                 throw std::invalid_argument("固定轨道不在允许集合中。");
         }
-        for (const auto& conflict : data_.station_conflicts)
-            if (conflict.arrival_headway < 0 || conflict.departure_headway < 0)
+        for (const auto& section : data_.section_orders) {
+            budget_.CheckEncoding();
+            if (section.arrival_headway < 0 || section.departure_headway < 0)
                 throw std::invalid_argument("到发间隔不得为负。");
+            (void)data_.visits.at(section.first_entry_visit_index);
+            (void)data_.visits.at(section.first_exit_visit_index);
+            (void)data_.visits.at(section.second_entry_visit_index);
+            (void)data_.visits.at(section.second_exit_visit_index);
+        }
+        for (const auto& conflict : data_.track_conflicts) {
+            budget_.CheckEncoding();
+            (void)data_.visits.at(conflict.first_visit_index);
+            (void)data_.visits.at(conflict.second_visit_index);
+            (void)data_.section_orders.at(conflict.section_order_index);
+        }
     }
 
     int NewVariable() {
@@ -160,7 +172,7 @@ private:
         return ++last_variable_;
     }
 
-    /// @brief 为时间顺序、到达次序、出发次序和轨道选择四类布尔变量分配唯一编号。
+    /// @brief 为时间顺序、区间次序和轨道选择三类布尔变量分配唯一编号。
     /// @details 容器中保存的是 SAT 变量编号，不是时刻或真假值；NewVariable() 从 2 开始编号，
     /// 编号 1 已保留为真常量。本函数只建立变量映射，具体约束由后续 Encode... 函数添加。
     void AllocateVariables() {
@@ -193,17 +205,11 @@ private:
             for (int k = 0; k < data_.planning_horizon; ++k) times.push_back(NewVariable());
         }
 
-        // ②③ 次序变量：每条同站同向冲突记录 c 分别分配一个到达次序和一个出发次序变量。
-        // arrival_orders_[c] 为真表示 first_visit 的到达侧事件先于或同时于 second_visit，
-        // departure_orders_[c] 为真表示 first_visit 的出发侧事件先于或同时于 second_visit；
-        // 为假时顺序相反。是否必须严格间隔由后续安全间隔约束决定，零间隔时允许同刻。
-        // 到达侧也可能是始发开始占轨，出发侧也可能是终到释放轨道，均沿用数据层的事件定义。
-        for (std::size_t c = 0; c < data_.station_conflicts.size(); ++c) {
-            arrival_orders_.push_back(NewVariable());
-            departure_orders_.push_back(NewVariable());
-        }
+        // 每个区间列车对的入口和出口共用一个次序文字。
+        for (std::size_t k = 0; k < data_.section_orders.size(); ++k)
+            section_orders_.push_back(NewVariable());
 
-        // ④ 轨道选择变量 z[v,g]：为每次车站访问 v 的每条允许轨道 g 分配一个布尔变量。
+        // ③ 轨道选择变量 z[v,g]：为每次车站访问 v 的每条允许轨道 g 分配一个布尔变量。
         // 为真表示该次访问使用轨道 g；v 对应“某趟车在某站的一次访问”，不是车站编号。
         // track_variables_[v][g] 保存变量编号；不同访问即使使用同一轨道，也有各自的选择变量。
         // 此处只分配允许轨道；恰好选择一条及既有固定轨道约束由 EncodeHeadwaysAndTracks 添加。
@@ -318,10 +324,8 @@ private:
         }
     }
 
-    /// @brief 编码每次车站访问的轨道选择，以及冲突列车对的到发间隔和同轨占用间隔。
-    /// @details AddMinimumDifference(before, after, gap, activation) 仅在 activation
-    /// 中所有文字为真时，要求 t[after]-t[before]>=gap；所有间隔均以模型时间步为单位。
-    void EncodeHeadwaysAndTracks() {
+    /// @brief 编码每次车站访问的轨道选择。
+    void EncodeTrackAssignments() {
         // ① 每次车站访问恰好选择一条允许轨道；v 是 data_.visits 中的访问下标。
         for (std::size_t v = 0; v < data_.visits.size(); ++v) {
             UseParticipants({v}); // 轨道唯一分配和固定轨道均随该候选启停。
@@ -339,62 +343,49 @@ private:
                 AddClause({track_variables_[v].at(*fixed)});
         }
 
-        // ② 逐对处理同站同向的冲突访问；c 同时索引该冲突对的到达、出发次序变量。
-        for (std::size_t c = 0; c < data_.station_conflicts.size(); ++c) {
-            const auto& conflict = data_.station_conflicts[c]; // 仅使用数据层生成的同站同向对。
-            UseParticipants({conflict.first_visit_index, conflict.second_visit_index});
-            // first、second 是冲突对中的两次车站访问，名称不代表已经确定的时间先后。
-            const auto& first = data_.visits.at(conflict.first_visit_index);
-            const auto& second = data_.visits.at(conflict.second_visit_index);
-            const int arrival_order = arrival_orders_[c];     // 到达次序变量编号：真表示 first 到达侧在前。
-            const int departure_order = departure_orders_[c]; // 出发次序变量编号：真表示 first 出发侧在前。
-            // 上述 int 存储变量编号，不是求解后的真值；负号表示相反次序的激活文字。
-            // 到达侧沿用实际到达或始发开始占轨事件；出发侧沿用实际出发或终到释放事件。
-            // 事件及有效间隔由数据层确定；间隔为 0 时，“在前”允许两事件同时发生。
+    }
 
-            // ③ 到达侧安全间隔：arrival_order 为真时 second 在 first 之后，
-            // 为假时 first 在 second 之后；两种次序均要求至少 arrival_headway 的间隔。
-            AddMinimumDifference(first.arrival_side_event_index, second.arrival_side_event_index,
-                conflict.arrival_headway, {arrival_order});
-            AddMinimumDifference(second.arrival_side_event_index, first.arrival_side_event_index,
-                conflict.arrival_headway, {-arrival_order});
-
-            // ④ 出发侧安全间隔：同样按 departure_order 的真假，分别约束两个方向。
-            // 到达、出发次序分别编码；区间禁越行关系由 EncodeSectionOrders() 另行连接。
-            AddMinimumDifference(first.departure_side_event_index, second.departure_side_event_index,
-                conflict.departure_headway, {departure_order});
-            AddMinimumDifference(second.departure_side_event_index, first.departure_side_event_index,
-                conflict.departure_headway, {-departure_order});
-
-            // ⑤ 同轨占用间隔：track 枚举双方都允许使用的轨道，不表示双方已经选中了它。
-            // 只有两车实际选择同一条轨道时，才要求前车释放后，后车才能开始占用。
-            // 上面的到发安全间隔不以同轨为前提；共同轨道集合为空时仅跳过本段。
-            for (int track : conflict.common_platform_indices) {
-                // 两个变量分别表示 first、second 是否选择当前 track。
-                const int first_track = track_variables_.at(conflict.first_visit_index).at(track);
-                const int second_track = track_variables_.at(conflict.second_visit_index).at(track);
-                // eq:sat-encode-track-compatibility：沿用到达次序，不另设占轨次序。
-                // 两车同轨且 first 到达侧在前：second 开始占轨 - first 释放轨道 >= track_headway。
-                // 花括号中三个激活文字必须全部为真，此时间差约束才生效。
-                AddMinimumDifference(first.departure_side_event_index, second.arrival_side_event_index,
-                    data_.track_headway, {first_track, second_track, arrival_order});
-                // 两车同轨且 second 到达侧在前：first 开始占轨 - second 释放轨道 >= track_headway。
-                AddMinimumDifference(second.departure_side_event_index, first.arrival_side_event_index,
-                    data_.track_headway, {first_track, second_track, -arrival_order});
-            }
+    /// @brief 区间两端间隔共用次序，候选条件覆盖两车的四次访问。
+    void EncodeSectionHeadways() {
+        // 次序为真表示 first 在前；间隔为零时允许同时发生。
+        for (std::size_t k = 0; k < data_.section_orders.size(); ++k) {
+            const auto& section = data_.section_orders[k];
+            UseParticipants({section.first_entry_visit_index, section.first_exit_visit_index,
+                             section.second_entry_visit_index, section.second_exit_visit_index});
+            const auto& first_entry = data_.visits.at(section.first_entry_visit_index);
+            const auto& second_entry = data_.visits.at(section.second_entry_visit_index);
+            const auto& first_exit = data_.visits.at(section.first_exit_visit_index);
+            const auto& second_exit = data_.visits.at(section.second_exit_visit_index);
+            const int order = section_orders_[k];
+            AddMinimumDifference(first_entry.departure_side_event_index, second_entry.departure_side_event_index,
+                section.departure_headway, {order});
+            AddMinimumDifference(second_entry.departure_side_event_index, first_entry.departure_side_event_index,
+                section.departure_headway, {-order});
+            AddMinimumDifference(first_exit.arrival_side_event_index, second_exit.arrival_side_event_index,
+                section.arrival_headway, {order});
+            AddMinimumDifference(second_exit.arrival_side_event_index, first_exit.arrival_side_event_index,
+                section.arrival_headway, {-order});
         }
     }
 
-    void EncodeSectionOrders() {
-        for (const auto& section : data_.section_orders) {
-            const auto& entry_conflict = data_.station_conflicts.at(section.entry_departure_conflict_index);
-            const auto& exit_conflict = data_.station_conflicts.at(section.exit_arrival_conflict_index);
-            UseParticipants({entry_conflict.first_visit_index, entry_conflict.second_visit_index,
-                             exit_conflict.first_visit_index, exit_conflict.second_visit_index});
-            const int entry = departure_orders_.at(section.entry_departure_conflict_index);
-            const int exit = arrival_orders_.at(section.exit_arrival_conflict_index);
-            AddClause({-entry, exit}); // 同一列车对：入口先后次序与出口相同。
-            AddClause({entry, -exit});
+    /// @brief 同轨占用间隔沿用关联区间的列车次序。
+    void EncodeTrackConflicts() {
+        for (const auto& conflict : data_.track_conflicts) {
+            const auto& section = data_.section_orders.at(conflict.section_order_index);
+            UseParticipants({conflict.first_visit_index, conflict.second_visit_index,
+                             section.first_entry_visit_index, section.first_exit_visit_index,
+                             section.second_entry_visit_index, section.second_exit_visit_index});
+            const auto& first = data_.visits.at(conflict.first_visit_index);
+            const auto& second = data_.visits.at(conflict.second_visit_index);
+            const int order = section_orders_.at(conflict.section_order_index);
+            for (int track : conflict.common_platform_indices) {
+                const int first_track = track_variables_.at(conflict.first_visit_index).at(track);
+                const int second_track = track_variables_.at(conflict.second_visit_index).at(track);
+                AddMinimumDifference(first.departure_side_event_index, second.arrival_side_event_index,
+                    data_.track_headway, {first_track, second_track, order});
+                AddMinimumDifference(second.departure_side_event_index, first.arrival_side_event_index,
+                    data_.track_headway, {first_track, second_track, -order});
+            }
         }
     }
 
@@ -413,8 +404,7 @@ private:
     int last_variable_ = 1;       ///< 真常量占用编号 1，业务变量从 2 开始。
     std::size_t clause_count_ = 1; ///< 包括初始化时固定真常量的单位子句。
     std::vector<std::vector<int>> time_variables_; ///< events 下标 -> q[e,0..H-1]。
-    std::vector<int> arrival_orders_;   ///< station_conflicts 下标 -> 到达次序文字。
-    std::vector<int> departure_orders_; ///< station_conflicts 下标 -> 出发次序文字。
+    std::vector<int> section_orders_; ///< 区间列车对下标 -> 次序文字。
     std::vector<std::map<int, int>> track_variables_; ///< visits 下标 -> 原轨道号 -> 文字。
 };
 } // namespace
